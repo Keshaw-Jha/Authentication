@@ -4,17 +4,28 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const ejs = require('ejs');
 const mongoose = require('mongoose');
-const encrypt = require('mongoose-encryption');
+const session = require('express-session');
+const passport = require ('passport');
+const passportLocalMongoose = require('passport-local-mongoose');
+
+const app = express();
+
+// PREVIOUS SECURITIES
+// const encrypt = require('mongoose-encryption');
+//MD5
+//const md5 = require('md5');
+// const bcrypt = require('bcrypt');
+// const saltRounds = 10;
 
 // console.log(process.env.PASS);
 
 //APP
-const app = express();
 
 
 
 //DATABASE CONNECTION
 mongoose.connect('mongodb://127.0.0.1:27017/userDB');
+
 
 //SET
 app.use(express.static("public"));
@@ -22,6 +33,18 @@ app.set('view engine', 'ejs');
 app.use(bodyParser.urlencoded({
     extended: true
 }));
+//SESSION integrated
+app.use(session({
+    secret: "tera beti ka saccha ashiq.",
+    resave: false,
+    saveUninitialized: false
+}));
+///PASSPORT
+app.use(passport.initialize());
+app.use(passport.session());
+
+
+
 
 ///DATABASE 
 const userSchema = new mongoose.Schema({
@@ -29,16 +52,23 @@ const userSchema = new mongoose.Schema({
     password: String
 });
 
+//adding passport local plugin
+userSchema.plugin(passportLocalMongoose);
+
 //ADDING SECRET TO SCHEMA
 
-userSchema.plugin(encrypt, { 
-        secret: process.env.SECRET , 
-        encryptedFields: ['password'] 
-    });
+// userSchema.plugin(encrypt, { 
+//         secret: process.env.SECRET , 
+//         encryptedFields: ['password'] 
+//     });
 
 ///MODEL using SCHEMA
 const User = new mongoose.model("User",userSchema);
 
+passport.use(User.createStrategy());
+
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
 
 ///WORKING
 
@@ -50,25 +80,21 @@ app.route("/")
 
 //REGISTER ROUTE
 app.route('/register')
+
     .get((req,res)=>{
         res.render("register");
     })
 
     .post((req,res)=>{
-        const newUser = new User({
-            email: req.body.username,
-            password: req.body.password
-        });
-
-        newUser.save()
-        .then(doc=>{
-            // we are rendering the secrets page from inside the register bcoz we want to render it only when some one is registered or logged in.
-            res.render("secrets");
+        User.register({username: req.body.username}, req.body.password)
+        .catch(err => {
+            res.send(err);
         })
-        .catch(error => {
-            res.render(error);
-        });
-
+        .then(() => {           
+            passport.authenticate("local")(req,res,function () {
+                res.redirect("/secrets");
+            })
+        })
     })
 
 
@@ -79,28 +105,46 @@ app.route("/login")
         res.render("login");
     })
 
-    .post(async(req,res)=>{
-        const username = req.body.username;
-        const password = req.body.password;
-
-        User.findOne({email: username})
-        .then(doc =>{
-            if(doc){
-                if(doc.password === password){
-                    res.render("secrets");
-                }
-                else{
-                    res.send("password is wrong");
-                }
-            }
-            else {
-                res.send("no user account found with this name");
-            }
+    .post((req,res)=>{
+        const user = new User ({
+            username : req.body.username,
+            password : req.body.password
         });
+
+        req.login(user,function(err){
+            if(err) {
+                console.log(err);
+            } else {               
+                passport.authenticate("local")(req,res,function () {
+                    res.redirect("/secrets");
+                })
+            }
+        })
+    });
+
+//SECRETS ROUTE
+
+app.route("/secrets")   
+    
+    .get((req,res)=>{
+        if(req.isAuthenticated()){
+            res.render("secrets");
+        } else {
+            res.redirect("/login");
+        }
     })
 
+//LOGOUT
 
-
+app.route("/logout")
+    .get((req,res)=>{
+        req.logout((err)=>{
+            if(err){
+                res.send(err);
+            }
+            res.redirect("/");
+        });
+    })
 
 
 //APP LISTEN
